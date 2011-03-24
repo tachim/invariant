@@ -1,5 +1,6 @@
 #!/usr/bin/env python2.6
 
+import numpy.matlib as m
 import numpy as np
 from math import exp, sqrt
 from time import time
@@ -17,51 +18,58 @@ def logistic_p(p):
 sigma = np.vectorize(logistic)
 sigma_p = np.vectorize(logistic_p)
 
-class PlaneNNET(object):
-    ALPHA = 0.001
-
-    def __init__(self, W1, W2, imgdim = 96, n_hidden = 20, n_out = 3):
-        self.n_hidden = n_hidden
+class PlaneNNet(object):
+    def __init__(self, imgdim, n_hidden, n_out):
         self.imgdim = imgdim
+        self.n_hidden = n_hidden
         self.n_out = n_out
 
-        self.W1 = W1
-        self.W2 = W2
+        self.W1 = np.zeros((imgdim + 1, n_hidden))
+        self.W2 = np.zeros((n_hidden + 1, n_out))
 
-    def fwdprop(self, x0):
-        self.x0 = x0
+class EvalNNet(object):
+    def __init__(self, inp, sh, xh, so, xo):
+        self.inp = inp
+        self.sh = sh
+        self.xh = xh
+        self.so = so
+        self.xo = xo
 
-        self.s1 = self.W1.T * self.x0
-        self.x1 = sigma(self.s1)
+def fwd_prop(nnet, inp):
+    ''' PlaneNNet -> Input -> PlaneNNet'''
+    # add constant feature
+    n_rows = inp.shape[0]
+    inp.resize((n_rows + 1, 1))
+    inp[n_rows, 0] = 1
 
-        nrows_x1 = self.x1.shape[0]
-        assert self.x1.shape[1] == 1
+    sh = nnet.W1.T * inp
+    xh = sigma(sh)
+    n_xh_rows = xh.shape[0]
+    xh.resize((n_xh_rows + 1, 1))
+    xh[n_xh_rows, 0] = 1
 
-        self.x1.resize((nrows_x1 + 1, 1))
-        self.x1[nrows_x1,0] = 1
+    so = nnet.W2.T * xh
+    xo = sigma(so)
 
-        self.s2 = self.W2.T * self.x1
-        self.x2 = sigma(self.s2)
+    return EvalNNet(inp, sh, xh, so, xo)
 
-        return self.x2
+def backprop_hidden(nnet, evaluated):
+    common = evaluated.inp * sigma_p(evaluated.sh).T
+    ret = []
+    for out_ind in xrange(nnet.n_out):
+        w_mat = repmat(nnet.W2[:nnet.n_hidden, out_ind].T, common.shape[0], 1)
+        coeff = sigma_p(evaluated.so)[out_ind, 0]
+        ret.append(np.dot(common, w_mat) * coeff)
 
-    def calc_derivs(self):
-        sp_1 = np.asmatrix(sigma_p(self.s1))
-        sp_2 = np.asmatrix(sigma_p(self.s2))
+    return ret
 
-        tmp = self.x1 * sp_2.T
-        self.outer = [np.asmatrix(np.zeros((self.n_hidden, self.n_out))) for i in xrange(self.n_out)]
-        for i in xrange(self.n_out):
-            self.outer[i][:,i] = tmp[:,i]
-
-        lprods = [sp_2[i,0] * np.multiply(self.W2[:,i], sp_1) for i in xrange(self.n_out)]
-        self.inner = [self.x0 * e.T for e in lprods]
-
-    def calc_update(self, dx, dy, dz, dw):
-        ret = (dx * self.inner[0] + dy * self.inner[1] + dz * self.inner[2],
-                dx * self.outer[0] + dy * self.outer[1] + dz * self.outer[2])
-        return (ret[0] / dw, ret[1] / dw)
-
+def backprop_output(nnet, evaluated):
+    ret = []
+    for out_ind in xrange(nnet.n_out):
+        to_add = m.zeros((nnet.n_hidden + 1, nnet.n_out))
+        to_add[:, out_ind] = nnet.W2[:, out_ind]
+        ret.append(to_add * sigma_p(evaluated.xo[out_ind, 0]))
+    return ret
 
 def load_images():
     dat = open('smallnorb-5x46789x9x18x6x2x96x96-training-dat.mat', 'rb')
