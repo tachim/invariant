@@ -18,14 +18,20 @@ def logistic_p(p):
 sigma = np.vectorize(logistic)
 sigma_p = np.vectorize(logistic_p)
 
+class Derivatives(object):
+    def __init__(self, n_out, hidden, output):
+        self.n_out = n_out
+        self.hidden = hidden
+        self.output = output
+
 class PlaneNNet(object):
     def __init__(self, imgdim, n_hidden, n_out):
         self.imgdim = imgdim
         self.n_hidden = n_hidden
         self.n_out = n_out
 
-        self.W1 = np.zeros((imgdim + 1, n_hidden))
-        self.W2 = np.zeros((n_hidden + 1, n_out))
+        self.W1 = m.random.random((imgdim + 1, n_hidden)) / 1e3
+        self.W2 = m.random.random((n_hidden + 1, n_out)) / 1e3
 
 class EvalNNet(object):
     def __init__(self, inp, sh, xh, so, xo):
@@ -39,13 +45,13 @@ def fwd_prop(nnet, inp):
     ''' PlaneNNet -> Input -> PlaneNNet'''
     # add constant feature
     n_rows = inp.shape[0]
-    inp.resize((n_rows + 1, 1))
+    inp = np.asmatrix(m.resize(inp, (n_rows + 1, 1)))
     inp[n_rows, 0] = 1
 
     sh = nnet.W1.T * inp
     xh = sigma(sh)
     n_xh_rows = xh.shape[0]
-    xh.resize((n_xh_rows + 1, 1))
+    xh = np.asmatrix(m.resize(xh, (n_xh_rows + 1, 1)))
     xh[n_xh_rows, 0] = 1
 
     so = nnet.W2.T * xh
@@ -53,23 +59,73 @@ def fwd_prop(nnet, inp):
 
     return EvalNNet(inp, sh, xh, so, xo)
 
-def backprop_hidden(nnet, evaluated):
-    common = evaluated.inp * sigma_p(evaluated.sh).T
-    ret = []
-    for out_ind in xrange(nnet.n_out):
-        w_mat = repmat(nnet.W2[:nnet.n_hidden, out_ind].T, common.shape[0], 1)
-        coeff = sigma_p(evaluated.so)[out_ind, 0]
-        ret.append(np.dot(common, w_mat) * coeff)
+def back_prop(nnet, evaluated):
+    ''' PlaneNNet -> EvalNNet -> Derivatives '''
 
-    return ret
+    def _backprop_hidden(nnet, evaluated):
+        common = np.asmatrix(evaluated.inp * sigma_p(evaluated.sh).T)
+        ret = []
+        for out_ind in xrange(nnet.n_out):
+            w_mat = np.asmatrix(m.repmat(nnet.W2[:nnet.n_hidden, out_ind].T, common.shape[0], 1))
+            coeff = np.asmatrix(sigma_p(evaluated.so))[out_ind, 0]
+            to_append = m.multiply(common, w_mat)
+            ret.append(to_append * coeff)
 
-def backprop_output(nnet, evaluated):
-    ret = []
-    for out_ind in xrange(nnet.n_out):
-        to_add = m.zeros((nnet.n_hidden + 1, nnet.n_out))
-        to_add[:, out_ind] = nnet.W2[:, out_ind]
-        ret.append(to_add * sigma_p(evaluated.xo[out_ind, 0]))
-    return ret
+        return ret
+
+    def _backprop_output(nnet, evaluated):
+        ret = []
+        for out_ind in xrange(nnet.n_out):
+            to_add = m.zeros((nnet.n_hidden + 1, nnet.n_out))
+            to_add[:, out_ind] = np.asmatrix(nnet.W2)[:, out_ind]
+            ret.append(to_add * sigma_p(evaluated.xo)[out_ind, 0])
+        return ret
+
+    return Derivatives(nnet.n_out, 
+            _backprop_hidden(nnet, evaluated),
+            _backprop_output(nnet, evaluated))
+
+def update_nnet(nnet, e1, e2, d1, d2, are_similar):
+    ''' PlaneNNet -> EvalNNet -> EvalNNet -> Derivatives -> Derivatives -> bool -> PlaneNNet '''
+    M = 0.1
+    ALPHA = 0.01
+    delta = e1.xo - e2.xo
+    assert (delta.T * delta).shape == (1, 1), str((delta.T * delta).shape)
+    dist = sqrt((delta.T * delta)[0,0])
+
+    if are_similar and dist <= M:
+        print 'close enough'
+        return nnet
+    if not are_similar and dist >= M:
+        print 'far enough apart'
+        return nnet
+    if dist < 1e-8:
+        print 'distance too small:', dist, 'similar:', are_similar
+        return nnet
+
+    if not are_similar and dist <= M:
+        print 'NOT SIMILAR, d=%f' % dist
+
+    dx = e1.xo[0,0] - e2.xo[0,0]
+    dy = e1.xo[1,0] - e2.xo[1,0]
+    dz = e1.xo[2,0] - e2.xo[2,0]
+
+    def _calc_deriv(g_mats, h_mats):
+        return dx * (g_mats[0] - h_mats[0]) + dy * (g_mats[1] - h_mats[1]) + \
+                dz * (g_mats[2] - h_mats[2])
+
+    dDw_dhidden = _calc_deriv(d1.hidden, d2.hidden)
+    dDw_dout = _calc_deriv(d1.output, d2.output)
+
+    ret_nnet = PlaneNNet(nnet.imgdim, nnet.n_hidden, nnet.n_out)
+    if are_similar:
+        ret_nnet.W1 = nnet.W1 - ALPHA * dDw_dhidden
+        ret_nnet.W2 = nnet.W2 - ALPHA * dDw_dout
+    else:
+        ret_nnet.W1 = nnet.W1 - ALPHA * (M / dist - 1) * dDw_dhidden
+        ret_nnet.W2 = nnet.W2 - ALPHA * (M / dist - 1) * dDw_dout
+
+    return ret_nnet
 
 def load_images():
     dat = open('smallnorb-5x46789x9x18x6x2x96x96-training-dat.mat', 'rb')
@@ -133,16 +189,6 @@ ADJ = 1
 M = 1.25
 
 if __name__=='__main__':
-    imgdim = 96 * 96
-    n_hidden = 20
-    n_out = 3
-#    W1 = np.asmatrix(np.random.rand(imgdim + 1, n_hidden).astype(np.float64))
-#    W2 = np.asmatrix(np.random.rand(n_hidden + 1, n_out).astype(np.float64))
-    W1 = np.asmatrix(np.zeros((imgdim + 1, n_hidden)).astype(np.float64))
-    W2 = np.asmatrix(np.zeros((n_hidden + 1, n_out)).astype(np.float64))
-    net1 = PlaneNNET(W1, W2, imgdim = imgdim)
-    net2 = PlaneNNET(W1, W2, imgdim = imgdim)
-
     # actually process the pairs :)
     elevations, azimuths, imglis = load_images()
 
@@ -172,6 +218,8 @@ if __name__=='__main__':
     n_divzero = 0
     n_total = 0
 
+    nnet = PlaneNNet(96 * 96, 20, 3)
+
     for (i, (cat, (e1, a1, e2, a2))) in enumerate(train_set[:300]):
         print i, '/', len(train_set)
         imgset1 = elevations[e1][a1]
@@ -181,46 +229,14 @@ if __name__=='__main__':
         for img1 in imgset1:
             for img2 in imgset2:
                 n_total += 1
-                im1data = imglis[img1]
-                im2data = imglis[img2]
+                im1data = np.asmatrix(imglis[img1])
+                im2data = np.asmatrix(imglis[img2])
 
-                print 'DIFFERENCE:', np.abs(im1data - im2data).sum()
+                e1 = fwd_prop(nnet, im1data)
+                e2 = fwd_prop(nnet, im2data)
+                d1 = back_prop(nnet, e1)
+                d2 = back_prop(nnet, e2)
 
-                # add the constant feature
-                nrows_im1 = im1data.shape[0]
-                im1data = np.resize(im1data, (nrows_im1 + 1, 1))
-                im1data[nrows_im1,0] = 1
-                nrows_im2 = im2data.shape[0]
-                im2data = np.resize(im2data, (nrows_im2 + 1, 1))
-                im2data[nrows_im2,0] = 1
+                nnet = update_nnet(nnet, e1, e2, d1, d2, cat == ADJ)
 
-                g1 = net1.fwdprop(im1data)
-                g2 = net2.fwdprop(im2data)
-                print g1, g2
-                delta = g1 - g2
-                dw2 = delta.T * delta
-                if dw2 == 0:
-                    n_divzero += 1
-                    continue
-                net1.calc_derivs()
-                net2.calc_derivs()
-                dw = sqrt(dw2)
-                if cat == NONADJ and dw > M:
-                    continue
-                dx, dy, dz = delta[0,0], delta[1,0], delta[2,0]
-
-                up1 = net1.calc_update(dx, dy, dz, dw)
-                up2 = net2.calc_update(dx, dy, dz, dw)
-                inner_grad = up1[0] - up2[0]
-                outer_grad = up1[1] - up2[1]
-
-                if cat == NONADJ:
-                    outer_grad *= -(M - dw)
-                    inner_grad *= -(M - dw)
-                else:
-                    outer_grad *= dw
-                    inner_grad *= dw
-
-                net1.W1 -= inner_grad * PlaneNNET.ALPHA
-                net1.W2 -= outer_grad * PlaneNNET.ALPHA
         print n_divzero, 'zero out of', n_total
