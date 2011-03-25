@@ -85,14 +85,16 @@ def back_prop(nnet, evaluated):
             _backprop_hidden(nnet, evaluated),
             _backprop_output(nnet, evaluated))
 
-def update_nnet(nnet, e1, e2, d1, d2, are_similar):
-    ''' PlaneNNet -> EvalNNet -> EvalNNet -> Derivatives -> Derivatives -> bool -> PlaneNNet '''
-    M = 0.1
-    ALPHA = 0.01
+def eval_dist(e1, e2):
     delta = e1.xo - e2.xo
     assert (delta.T * delta).shape == (1, 1), str((delta.T * delta).shape)
-    dist = sqrt((delta.T * delta)[0,0])
+    return sqrt((delta.T * delta)[0,0])
 
+def update_nnet(nnet, e1, e2, d1, d2, are_similar):
+    ''' PlaneNNet -> EvalNNet -> EvalNNet -> Derivatives -> Derivatives -> bool -> PlaneNNet '''
+    M = 0.01
+    ALPHA = 10.
+    dist = eval_dist(e1, e2)
     if are_similar and dist <= M:
         print 'close enough'
         return nnet
@@ -122,8 +124,8 @@ def update_nnet(nnet, e1, e2, d1, d2, are_similar):
         ret_nnet.W1 = nnet.W1 - ALPHA * dDw_dhidden
         ret_nnet.W2 = nnet.W2 - ALPHA * dDw_dout
     else:
-        ret_nnet.W1 = nnet.W1 - ALPHA * (M / dist - 1) * dDw_dhidden
-        ret_nnet.W2 = nnet.W2 - ALPHA * (M / dist - 1) * dDw_dout
+        ret_nnet.W1 = nnet.W1 + ALPHA * (M / dist - 1) * dDw_dhidden
+        ret_nnet.W2 = nnet.W2 + ALPHA * (M / dist - 1) * dDw_dout
 
     return ret_nnet
 
@@ -232,6 +234,7 @@ if __name__=='__main__':
                 im1data = np.asmatrix(imglis[img1])
                 im2data = np.asmatrix(imglis[img2])
 
+                print np.abs(nnet.W1).sum()
                 e1 = fwd_prop(nnet, im1data)
                 e2 = fwd_prop(nnet, im2data)
                 d1 = back_prop(nnet, e1)
