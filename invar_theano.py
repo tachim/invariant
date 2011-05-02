@@ -43,37 +43,50 @@ class DimLayer(object):
         self.proj = output.sum()
         self.proj_fcn = T.function([inp], self.proj)
         
-x1 = DimLayer('x', DimLayer.inp1)
-x2 = DimLayer('x', DimLayer.inp2)
-y1 = DimLayer('y', DimLayer.inp1)
-y2 = DimLayer('y', DimLayer.inp2)
-z1 = DimLayer('z', DimLayer.inp1)
-z2 = DimLayer('z', DimLayer.inp2)
+class NNet(object):
+    def __init__(self):
+        x1 = DimLayer('x', DimLayer.inp1)
+        x2 = DimLayer('x', DimLayer.inp2)
+        y1 = DimLayer('y', DimLayer.inp1)
+        y2 = DimLayer('y', DimLayer.inp2)
+        z1 = DimLayer('z', DimLayer.inp1)
+        z2 = DimLayer('z', DimLayer.inp2)
 
-dw = M.sqrt((x1.proj - x2.proj) ** 2 + \
-        (y1.proj - y2.proj) ** 2 + \
-        (z1.proj - z2.proj) ** 2)
+        dw = M.sqrt((x1.proj - x2.proj) ** 2 + \
+                (y1.proj - y2.proj) ** 2 + \
+                (z1.proj - z2.proj) ** 2)
 
-m = 0.05
-simparmupdates = {}
-dissimparmupdates = {}
-for lis in DimLayer.arrdict.values():
-    for parm in lis:
-        simparmupdates[parm] = parm - 0.1 * dw * M.grad(dw, parm)
-        dissimparmupdates[parm] = parm + 0.1 * (m - dw) * M.grad(dw, parm)
+        m = 0.05
+        simparmupdates = {}
+        dissimparmupdates = {}
+        for lis in DimLayer.arrdict.values():
+            for parm in lis:
+                simparmupdates[parm] = parm - 0.1 * dw * M.grad(dw, parm)
+                dissimparmupdates[parm] = parm + 0.1 * (m - dw) * M.grad(dw, parm)
 
-simupdatefcn = T.function([DimLayer.inp1, DimLayer.inp2], updates = simparmupdates)
-dissimupdatefcn = T.function([DimLayer.inp1, DimLayer.inp2], updates = dissimparmupdates)
-pfcn = T.function([DimLayer.inp1, DimLayer.inp2], dw)
+        self.simupdatefcn = T.function([DimLayer.inp1, DimLayer.inp2], updates = simparmupdates)
+        self.dissimupdatefcn = T.function([DimLayer.inp1, DimLayer.inp2], updates = dissimparmupdates)
+        self.pfcn = T.function([DimLayer.inp1, DimLayer.inp2], dw)
+
+    def sim(self, img1, img2):
+        self.simupdatefcn(img1, img2)
+
+    def dissim(self, img1, img2):
+        self.dissimupdatefcn(img1, img2)
+
+    def dist(self, img1, img2):
+        return self.pfcn(img1, img2)
 
 img1 = np.random.random((96 * 96, 1))
 img2 = np.random.random((96 * 96, 1))
 img1 /= np.absolute(img1).sum()
 img2 /= np.absolute(img2).sum()
 
+nnet = NNet()
+
 def iter():
-    dissimupdatefcn(img1, img2)
-    print pfcn(img1, img2)
+    nnet.dissim(img1, img2)
+    print nnet.dist(img1, img2)
 
 def main():
     for i in xrange(100):
