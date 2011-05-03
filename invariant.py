@@ -5,9 +5,11 @@
 from collections import defaultdict as dd
 import numpy as np
 from struct import unpack
-from random import sample, shuffle
+from random import sample, shuffle, choice
 
 from invar_theano import NNet
+from time import time
+import theano as T
 
 def load_images():
     dat = open('smallnorb-5x46789x9x18x6x2x96x96-training-dat.mat', 'rb')
@@ -25,7 +27,7 @@ def load_images():
 
     # process an individual airplane image
     def _procnext():
-        tmp = np.fromfile(dat, np.uint8, 96 * 96).astype(np.float64) / 255.0
+        tmp = np.fromfile(dat, np.uint8, 96 * 96).astype(T.config.floatX) / 255.0
         if tmp.shape[0] == 0:
             raise IOError("out of shit")
         next_im = np.asmatrix(tmp.reshape((96 * 96, 1)))
@@ -39,7 +41,7 @@ def load_images():
         # read the category
         category = unpack('i', cat.read(4))[0]
 
-        if category != 2 or instance != 7:
+        if category != 2 or instance != 7 or lighting != 0:
             return False
 
         retlis.append(next_im)
@@ -58,6 +60,8 @@ def load_images():
                 ct += 1
         except IOError:
             break
+	except MemoryError:
+	    break
     print ct, 'pics'
 
     dat.close()
@@ -103,7 +107,7 @@ if __name__=='__main__':
                 for a1 in xrange(0, 34, 2):
                     if abs(e - e1) > 1 or abs(a - a1) > 1:
                         nonadj.append((e, a, e1, a1))
-    nonadj = sample(nonadj, 5000)
+    #nonadj = sample(nonadj, 5000)
     pairs = [(ADJ, e) for e in pairs]
     nonadj = [(NONADJ, e) for e in nonadj]
 
@@ -112,38 +116,49 @@ if __name__=='__main__':
 
     nnet = NNet()
 
-    writeproj('before_train.txt', projpoints(nnet, imglis))
+    writeproj('before_train_%f.txt' % nnet.rate, projpoints(nnet, imglis))
+
+    avgtimes = []
 
     for (i, (cat, (e1, a1, e2, a2))) in enumerate(train_set):
-        print i, '/', len(train_set)
-        if i % 100 == 0:
-            writeproj('after_train_%d.txt' % i, projpoints(nnet, imglis))
+        #print i, '/', len(train_set)
+        '''
+        if i % 1000 == 0:
+            writeproj('after_train_%d_%f.txt' % (i, nnet.rate), projpoints(nnet, imglis))
+        '''
+        if i % 10 == 1:
+            avgtime = sum(avgtimes) / len(avgtimes)
+            print (len(train_set) - i) * avgtime / 60, 'minutes'
         imgset1 = elevations[e1][a1]
         imgset2 = elevations[e2][a2]
-        if len(imgset1) != 6 or len(imgset2) != 6:
+        if len(imgset1) == 0 or len(imgset2) == 0:
             continue
-        for img1 in imgset1:
-            for img2 in imgset2:
-                im1data = np.asmatrix(imglis[img1])
-                im2data = np.asmatrix(imglis[img2])
+        before = time()
+        img1 = choice(imgset1)
+        img2 = choice(imgset2)
+        im1data = np.asmatrix(imglis[img1])
+        im2data = np.asmatrix(imglis[img2])
 
-                dw = nnet.dist(im1data, im2data)
-                if cat == ADJ:
-                    nnet.sim(im1data, im2data)
-                else:
-                    if dw < nnet.m:
-                        nnet.dissim(im1data, im2data)
-                dw_after = nnet.dist(im1data, im2data)
+        dw = nnet.dist(im1data, im2data)
+        if cat == ADJ:
+            nnet.sim(im1data, im2data)
+        else:
+            if dw < nnet.m:
+                nnet.dissim(im1data, im2data)
+        dw_after = nnet.dist(im1data, im2data)
+        def psymb(s):
+            pass
+            #print dw, s, dw_after
 
-                def psymb(s):
-                    print dw, s, dw_after
+        if cat == ADJ:
+            psymb('>')
+            if not dw > dw_after:
+                print ':('
+        elif cat == NONADJ and dw < nnet.m:
+            psymb('<')
+            if not dw < dw_after:
+                print ':('
+        after = time()
+        avgtimes.append(after - before)
 
-                if cat == ADJ:
-                    psymb('>')
-                    if not dw > dw_after:
-                        print ':('
-                elif cat == NONADJ and dw < nnet.m:
-                    psymb('<')
-                    if not dw < dw_after:
-                        print ':('
-    writeproj('after_train_final.txt', projpoints(nnet, imglis))
+    writeproj('after_train_final_%f.txt' % nnet.rate, projpoints(nnet, imglis))

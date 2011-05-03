@@ -28,9 +28,9 @@ class DimLayer(object):
 
     arrdict = dd(lambda : [
                 T.shared(rand_init(inp_dim, hidden_dim)),
-                T.shared(np.zeros((hidden_dim, 1))),
+                T.shared(np.zeros((hidden_dim, 1), dtype = T.config.floatX)),
                 T.shared(rand_init(hidden_dim, 1)),
-                T.shared(np.zeros((1, 1)))
+                T.shared(np.zeros((1, 1), dtype = T.config.floatX))
                 ])
 
     def __init__(self, name, inp):
@@ -41,7 +41,6 @@ class DimLayer(object):
         hidden_act = M.tanh(hidden)
         output = (T.dot(w_output.T, hidden_act) + b_output)
         self.proj = output.sum()
-        self.proj_fcn = T.function([inp], self.proj)
         
 class NNet(object):
     def __init__(self):
@@ -57,12 +56,13 @@ class NNet(object):
                 (z1.proj - z2.proj) ** 2)
 
         self.m = 0.05
+        self.rate = .03
         simparmupdates = {}
         dissimparmupdates = {}
         for lis in DimLayer.arrdict.values():
             for parm in lis:
-                simparmupdates[parm] = parm - 0.01 * dw * M.grad(dw, parm)
-                dissimparmupdates[parm] = parm + 0.01 * (self.m - dw) * M.grad(dw, parm)
+                simparmupdates[parm] = parm - self.rate * dw * M.grad(dw, parm)
+                dissimparmupdates[parm] = parm + self.rate * (self.m - dw) * M.grad(dw, parm)
 
         self.projfcn = T.function([DimLayer.inp1], [x1.proj, y1.proj, z1.proj])
         self.simupdatefcn = T.function([DimLayer.inp1, DimLayer.inp2], updates = simparmupdates)
@@ -81,8 +81,8 @@ class NNet(object):
     def dist(self, img1, img2):
         return self.pfcn(img1, img2)
 
-img1 = np.random.random((96 * 96, 1))
-img2 = np.random.random((96 * 96, 1))
+img1 = np.random.random((96 * 96, 1)).astype(T.config.floatX)
+img2 = np.random.random((96 * 96, 1)).astype(T.config.floatX)
 img1 /= np.absolute(img1).sum()
 img2 /= np.absolute(img2).sum()
 
@@ -90,11 +90,13 @@ nnet = NNet()
 
 def iter():
     nnet.dissim(img1, img2)
-    print nnet.dist(img1, img2)
+    #nnet.dist(img1, img2)
 
 def main():
+    b = time()
     for i in xrange(100):
         iter()
+    print time() - b
 
 if __name__=='__main__':
     main()
