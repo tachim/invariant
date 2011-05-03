@@ -56,17 +56,21 @@ class NNet(object):
                 (y1.proj - y2.proj) ** 2 + \
                 (z1.proj - z2.proj) ** 2)
 
-        m = 0.05
+        self.m = 0.05
         simparmupdates = {}
         dissimparmupdates = {}
         for lis in DimLayer.arrdict.values():
             for parm in lis:
-                simparmupdates[parm] = parm - 0.1 * dw * M.grad(dw, parm)
-                dissimparmupdates[parm] = parm + 0.1 * (m - dw) * M.grad(dw, parm)
+                simparmupdates[parm] = parm - 0.01 * dw * M.grad(dw, parm)
+                dissimparmupdates[parm] = parm + 0.01 * (self.m - dw) * M.grad(dw, parm)
 
+        self.projfcn = T.function([DimLayer.inp1], [x1.proj, y1.proj, z1.proj])
         self.simupdatefcn = T.function([DimLayer.inp1, DimLayer.inp2], updates = simparmupdates)
         self.dissimupdatefcn = T.function([DimLayer.inp1, DimLayer.inp2], updates = dissimparmupdates)
         self.pfcn = T.function([DimLayer.inp1, DimLayer.inp2], dw)
+
+    def project(self, img1):
+        return self.projfcn(img1)
 
     def sim(self, img1, img2):
         self.simupdatefcn(img1, img2)

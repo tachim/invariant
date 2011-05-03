@@ -1,5 +1,14 @@
 #!/usr/bin/env python
 
+#from invar_theano import NNet
+
+from collections import defaultdict as dd
+import numpy as np
+from struct import unpack
+from random import sample, shuffle
+
+from invar_theano import NNet
+
 def load_images():
     dat = open('smallnorb-5x46789x9x18x6x2x96x96-training-dat.mat', 'rb')
     cat = open('smallnorb-5x46789x9x18x6x2x96x96-training-cat.mat', 'rb')
@@ -9,8 +18,8 @@ def load_images():
     cat.read(20)
     info.read(20)
 
-    azimuths = defaultdict(lambda : defaultdict(list))
-    elevations = defaultdict(lambda : defaultdict(list))
+    azimuths = dd(lambda : dd(list))
+    elevations = dd(lambda : dd(list))
 
     retlis = []
 
@@ -61,6 +70,19 @@ NONADJ = 0
 ADJ = 1
 M = 1.25
 
+def projpoints(nnet, imglis):
+    ret = []
+    for (i, im) in enumerate(imglis):
+        x, y, z = [e.item() for e in nnet.project(im)]
+        ret.append((x, y, z))
+
+    return ret
+
+def writeproj(fname, proj):
+    with open(fname, 'w') as f:
+        for (x, y, z) in proj:
+            print >>f, x, y, z
+
 if __name__=='__main__':
     # actually process the pairs :)
     elevations, azimuths, imglis = load_images()
@@ -88,12 +110,11 @@ if __name__=='__main__':
     train_set = pairs + nonadj
     shuffle(train_set)
 
-    n_divzero = 0
-    n_total = 0
+    nnet = NNet()
 
-    nnet = PlaneNNet(96 * 96, 20, 3)
+    writeproj('before_train.txt', projpoints(nnet, imglis))
 
-    for (i, (cat, (e1, a1, e2, a2))) in enumerate(train_set[:300]):
+    for (i, (cat, (e1, a1, e2, a2))) in enumerate(train_set[:1000]):
         print i, '/', len(train_set)
         imgset1 = elevations[e1][a1]
         imgset2 = elevations[e2][a2]
@@ -101,16 +122,27 @@ if __name__=='__main__':
             continue
         for img1 in imgset1:
             for img2 in imgset2:
-                n_total += 1
                 im1data = np.asmatrix(imglis[img1])
                 im2data = np.asmatrix(imglis[img2])
 
-                print np.abs(nnet.W1).sum()
-                e1 = fwd_prop(nnet, im1data)
-                e2 = fwd_prop(nnet, im2data)
-                d1 = back_prop(nnet, e1)
-                d2 = back_prop(nnet, e2)
+                dw = nnet.dist(im1data, im2data)
+                if cat == ADJ:
+                    nnet.sim(im1data, im2data)
+                else:
+                    if dw < nnet.m:
+                        nnet.dissim(im1data, im2data)
+                dw_after = nnet.dist(im1data, im2data)
 
-                nnet = update_nnet(nnet, e1, e2, d1, d2, cat == ADJ)
+                def psymb(s):
+                    print dw, s, dw_after
 
-        print n_divzero, 'zero out of', n_total
+                if cat == ADJ:
+                    psymb('>')
+                    if not dw > dw_after:
+                        print ':('
+                elif cat == NONADJ and dw < nnet.m:
+                    psymb('<')
+                    if not dw < dw_after:
+                        print ':('
+
+    writeproj('after_train.txt', projpoints(nnet, imglis))
