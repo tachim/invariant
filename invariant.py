@@ -114,8 +114,10 @@ if __name__=='__main__':
 
     writeproj('before_train.txt', projpoints(nnet, imglis))
 
-    for (i, (cat, (e1, a1, e2, a2))) in enumerate(train_set[:1000]):
+    for (i, (cat, (e1, a1, e2, a2))) in enumerate(train_set):
         print i, '/', len(train_set)
+        if i % 100 == 0:
+            writeproj('after_train_%d.txt' % i, projpoints(nnet, imglis))
         imgset1 = elevations[e1][a1]
         imgset2 = elevations[e2][a2]
         if len(imgset1) != 6 or len(imgset2) != 6:
@@ -144,5 +146,4 @@ if __name__=='__main__':
                     psymb('<')
                     if not dw < dw_after:
                         print ':('
-
-    writeproj('after_train.txt', projpoints(nnet, imglis))
+    writeproj('after_train_final.txt', projpoints(nnet, imglis))
