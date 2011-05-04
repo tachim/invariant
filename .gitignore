@@ -1,1 +1,6 @@
 *.mat
+*.txt
+*.jpg
+*.so
+*.log
+*.lua
